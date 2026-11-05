@@ -90,7 +90,7 @@ F[RES + '/layout/widget_grande.xml'] = '''<?xml version="1.0" encoding="utf-8"?>
   <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:orientation="horizontal" android:gravity="bottom">
     <TextView android:id="@+id/g_res" android:layout_width="wrap_content" android:layout_height="wrap_content" android:maxLines="1" android:textColor="#FFFFFF" android:textSize="28sp" android:textStyle="bold"/>
     <TextView android:id="@+id/g_unidad" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginLeft="4dp" android:layout_marginBottom="4dp" android:textColor="#A5A8B0" android:textSize="12sp" android:textStyle="bold"/>
-    <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1"/>
+    <FrameLayout android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1"/>
     <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="vertical" android:gravity="right">
       <TextView android:id="@+id/g_tasa" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#A5A8B0" android:textSize="10sp"/>
       <TextView android:id="@+id/g_var" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textStyle="bold"/>
@@ -117,10 +117,10 @@ F[RES + '/layout/widget_chico.xml'] = '''<?xml version="1.0" encoding="utf-8"?>
     android:id="@+id/c_root" android:layout_width="match_parent" android:layout_height="match_parent"
     android:orientation="vertical" android:padding="12dp" android:background="@drawable/bg_widget">
   <TextView android:id="@+id/c_titulo" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold"/>
-  <View android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"/>
+  <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"/>
   <TextView android:id="@+id/c_num" android:layout_width="wrap_content" android:layout_height="wrap_content" android:maxLines="1" android:textColor="#FFFFFF" android:textSize="24sp" android:textStyle="bold"/>
   <TextView android:id="@+id/c_sub" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:maxLines="1" android:textColor="#A5A8B0" android:textSize="10sp"/>
-  <View android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"/>
+  <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"/>
   <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal">
 ''' + chip('c_c1', '1') + chip('c_c2', '10') + chip('c_c3', '100') + '''  </LinearLayout>
 </LinearLayout>
