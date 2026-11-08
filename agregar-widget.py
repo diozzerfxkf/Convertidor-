@@ -527,7 +527,7 @@ public class ConvWidgetChico extends AppWidgetProvider {
 '''
 
 
-# ---------- WIDGET DE MERCADOS (estilo punteado + grafica) ----------
+# ---------- WIDGET DE MERCADOS (paleta vino / lila / durazno + grafica) ----------
 F[RES + '/xml/widget_mercados_info.xml'] = """<?xml version="1.0" encoding="utf-8"?>
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="250dp"
@@ -536,6 +536,8 @@ F[RES + '/xml/widget_mercados_info.xml'] = """<?xml version="1.0" encoding="utf-
     android:targetCellHeight="2"
     android:updatePeriodMillis="1800000"
     android:initialLayout="@layout/widget_mercados"
+    android:configure="__PKG__.ConfigMercados"
+    android:widgetFeatures="reconfigurable"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"/>
 """
@@ -544,17 +546,7 @@ F[RES + '/layout/widget_mercados.xml'] = """<?xml version="1.0" encoding="utf-8"
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/m_root" android:layout_width="match_parent" android:layout_height="match_parent">
   <ImageView android:id="@+id/m_img" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitCenter"/>
-  <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
-    <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="3.5" android:orientation="horizontal">
-      <FrameLayout android:id="@+id/m_z_mercado" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"/>
-      <FrameLayout android:id="@+id/m_z_app" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"/>
-    </LinearLayout>
-    <FrameLayout android:id="@+id/m_z_par" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="3.6"/>
-    <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="2.9" android:orientation="horizontal">
-      <FrameLayout android:id="@+id/m_z_rango" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"/>
-      <FrameLayout android:id="@+id/m_z_ref" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"/>
-    </LinearLayout>
-  </LinearLayout>
+  <FrameLayout android:id="@+id/m_z_todo" android:layout_width="match_parent" android:layout_height="match_parent"/>
 </FrameLayout>
 """
 
@@ -582,9 +574,13 @@ public class MercadoDatos {
     // hora de apertura y cierre (hora local de cada bolsa): {h, min, h, min}
     static final int[][] HORA = {{10, 0, 16, 0}, {9, 0, 15, 30}, {8, 0, 16, 30}, {9, 30, 16, 0}};
 
-    static final String[][] PARES = {{"USD", "MXN"}, {"EUR", "MXN"}, {"GBP", "MXN"}, {"CAD", "MXN"}, {"JPY", "MXN"}, {"USD", "EUR"}, {"USD", "BRL"}};
+    static final String[] MONEDAS = {"USD", "EUR", "GBP", "JPY", "CAD", "MXN", "BRL", "AUD", "CHF", "CNY"};
     static final int[] DIAS = {30, 90, 180};
     static final String[] DIAS_TXT = {"1M", "3M", "6M"};
+    static final int[] AGRUPA = {2, 3, 5};
+
+    static final String[] ZONAS_ID = {"", "America/Mexico_City", "America/New_York", "Europe/London", "Asia/Tokyo", "UTC"};
+    static final String[] ZONAS_ET = {"hora local", "CDMX", "Nueva York", "Londres", "Tokio", "UTC"};
 
     static class Estado {
         int idx;
@@ -648,6 +644,24 @@ public class MercadoDatos {
         return mejor != null ? mejor : estado(0, ahora);
     }
 
+    /** Hora de apertura/cierre en la zona y formato (12 o 24 h) que eligio la persona. */
+    static String horaTxt(Context c, long t) {
+        SharedPreferences pr = WidgetDatos.sp(c);
+        int z = pr.getInt("m_zona", 0);
+        if (z < 0 || z >= ZONAS_ID.length) z = 0;
+        boolean h12 = pr.getInt("m_f", 0) == 1;
+        TimeZone tz = z == 0 ? TimeZone.getDefault() : TimeZone.getTimeZone(ZONAS_ID[z]);
+        SimpleDateFormat hf = new SimpleDateFormat(h12 ? "h:mm a" : "HH:mm", Locale.US);
+        hf.setTimeZone(tz);
+        SimpleDateFormat df = new SimpleDateFormat("yyyyMMdd", Locale.US);
+        df.setTimeZone(tz);
+        SimpleDateFormat dn = new SimpleDateFormat("EEE", new Locale("es", "MX"));
+        dn.setTimeZone(tz);
+        Date d = new Date(t);
+        String dia = df.format(d).equals(df.format(new Date())) ? "" : dn.format(d) + " ";
+        return dia + hf.format(d) + " · " + ZONAS_ET[z];
+    }
+
     static class Serie {
         String[] f = new String[0];
         double[] v = new double[0];
@@ -662,37 +676,33 @@ public class MercadoDatos {
         String txt = WidgetDatos.sp(c).getString(clave(de, a, dias), null);
         if (txt == null || txt.length() == 0) return s;
         String[] partes = txt.split(";");
-        s.f = new String[partes.length];
-        s.v = new double[partes.length];
+        String[] f = new String[partes.length];
+        double[] v = new double[partes.length];
         int n = 0;
         for (String p : partes) {
             int k = p.indexOf('=');
             if (k < 0) continue;
             try {
-                s.f[n] = p.substring(0, k);
-                s.v[n] = Double.parseDouble(p.substring(k + 1));
+                f[n] = p.substring(0, k);
+                v[n] = Double.parseDouble(p.substring(k + 1));
                 n++;
             } catch (Exception e) {
             }
         }
-        if (n < partes.length) {
-            Serie r = new Serie();
-            r.f = new String[n];
-            r.v = new double[n];
-            System.arraycopy(s.f, 0, r.f, 0, n);
-            System.arraycopy(s.v, 0, r.v, 0, n);
-            return r;
-        }
+        s.f = new String[n];
+        s.v = new double[n];
+        System.arraycopy(f, 0, s.f, 0, n);
+        System.arraycopy(v, 0, s.v, 0, n);
         return s;
     }
 
     /** Baja la grafica del par y rango elegidos si tiene mas de 3 horas. Llamar fuera del hilo principal. */
     static synchronized void refrescar(Context c, boolean forzar) {
         SharedPreferences p = WidgetDatos.sp(c);
-        int par = p.getInt("m_par", 0) % PARES.length;
+        String de = p.getString("m_de", "USD");
+        String a = p.getString("m_a", "MXN");
         int rg = p.getInt("m_rango", 0) % DIAS.length;
-        String de = PARES[par][0];
-        String a = PARES[par][1];
+        if (de.equals(a)) return;
         int dias = DIAS[rg];
         String k = clave(de, a, dias);
         long t = p.getLong(k + "_t", 0);
@@ -748,24 +758,27 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.RadialGradient;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.SystemClock;
 import android.widget.RemoteViews;
-import java.text.SimpleDateFormat;
-import java.util.Locale;
 
 public class ConvWidgetMercados extends AppWidgetProvider {
     static final String ACC = "__PKG__.ACC_MERCADOS";
     static final int W = 960;
     static final int H = 480;
-    static final int BLANCO = 0xFFF2F2F4;
-    static final int GRIS = 0xFFA5A8B0;
-    static final int NARANJA = 0xFFFF6A2B;
-    static final int VERDE = 0xFF3DDC97;
-    static final int ROJO = 0xFFFF6B6B;
+    // paleta: Crimson Violet, Clouded Periwinkle, Apricot Silk
+    static final int CRIM = 0xFF470B24;
+    static final int PERI = 0xFFB5BEDD;
+    static final int APRI = 0xFFFFEDD5;
+    static final int MUTE = 0xFF6B4A5E;
+    static final int SUBE = 0xFF1F7A5C;
+    static final int BAJA = 0xFFA8122E;
+    static final int ACENTO = 0xFFC2185B;
     static final String[] MESES = {"ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"};
 
     // letras de puntos 5x7
@@ -819,10 +832,8 @@ public class ConvWidgetMercados extends AppWidgetProvider {
             new Thread(new Runnable() {
                 public void run() {
                     try {
-                        accion(c, k);
                         repintar(c);
-                        MercadoDatos.refrescar(c, "ref".equals(k));
-                        WidgetDatos.refrescar(c, "ref".equals(k));
+                        MercadoDatos.refrescar(c, false);
                         repintar(c);
                         if ("tick".equals(k)) programar(c);
                     } catch (Exception e) {
@@ -833,20 +844,6 @@ public class ConvWidgetMercados extends AppWidgetProvider {
         } else {
             super.onReceive(c, i);
         }
-    }
-
-    static void accion(Context c, String k) {
-        if (k == null) return;
-        SharedPreferences p = WidgetDatos.sp(c);
-        SharedPreferences.Editor e = p.edit();
-        if (k.equals("mercado")) {
-            e.putInt("m_sel", (p.getInt("m_sel", 0) + 1) % (MercadoDatos.COD.length + 1));
-        } else if (k.equals("par")) {
-            e.putInt("m_par", (p.getInt("m_par", 0) + 1) % MercadoDatos.PARES.length);
-        } else if (k.equals("rango")) {
-            e.putInt("m_rango", (p.getInt("m_rango", 0) + 1) % MercadoDatos.DIAS.length);
-        }
-        e.apply();
     }
 
     /** Un aviso cada minuto mientras haya widgets (no despierta el telefono). */
@@ -866,9 +863,10 @@ public class ConvWidgetMercados extends AppWidgetProvider {
         return PendingIntent.getBroadcast(c, rc, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
-    static PendingIntent abrir(Context c) {
-        Intent i = c.getPackageManager().getLaunchIntentForPackage(c.getPackageName());
-        return PendingIntent.getActivity(c, 2, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    static PendingIntent config(Context c) {
+        Intent i = new Intent(c, ConfigMercados.class);
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        return PendingIntent.getActivity(c, 5, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     static void repintar(Context c) {
@@ -879,11 +877,7 @@ public class ConvWidgetMercados extends AppWidgetProvider {
         for (int id : ids) {
             RemoteViews v = new RemoteViews(c.getPackageName(), R.layout.widget_mercados);
             v.setImageViewBitmap(R.id.m_img, b);
-            v.setOnClickPendingIntent(R.id.m_z_mercado, pi(c, "mercado", 301));
-            v.setOnClickPendingIntent(R.id.m_z_app, abrir(c));
-            v.setOnClickPendingIntent(R.id.m_z_par, pi(c, "par", 302));
-            v.setOnClickPendingIntent(R.id.m_z_rango, pi(c, "rango", 303));
-            v.setOnClickPendingIntent(R.id.m_z_ref, pi(c, "ref", 304));
+            v.setOnClickPendingIntent(R.id.m_z_todo, config(c));
             m.updateAppWidget(id, v);
         }
     }
@@ -921,12 +915,12 @@ public class ConvWidgetMercados extends AppWidgetProvider {
         for (int i = 0; i < s.length(); i++) {
             char ch = s.charAt(i);
             if (ch == ':') {
-                p.setColor(NARANJA);
+                p.setColor(PERI);
                 cv.drawCircle(x + r, yTop + 2 * d + r, r, p);
                 cv.drawCircle(x + r, yTop + 4 * d + r, r, p);
                 x += d + d;
             } else if (ch >= '0' && ch <= '9') {
-                p.setColor(BLANCO);
+                p.setColor(APRI);
                 String[] g = GLIFOS[ch - '0'];
                 for (int fila = 0; fila < 7; fila++) {
                     for (int col = 0; col < 5; col++) {
@@ -938,26 +932,46 @@ public class ConvWidgetMercados extends AppWidgetProvider {
         }
     }
 
+    static float yDe(double v, double mn, double mx, float y0, float y1) {
+        return (float) (y1 - (v - mn) / (mx - mn) * (y1 - y0));
+    }
+
+    static void fondo(Canvas cv, Paint p) {
+        // borde inferior (efecto de tarjeta apilada)
+        p.setStyle(Paint.Style.FILL);
+        p.setColor(0xFFE2C29B);
+        cv.drawRoundRect(new RectF(0, 10, W, H), 56, 56, p);
+        RectF tarjeta = new RectF(0, 0, W, H - 10);
+        p.setShader(new LinearGradient(W * 0.52f, 0, W * 0.48f, H - 10,
+            new int[]{CRIM, CRIM, PERI, PERI, APRI}, new float[]{0f, 0.33f, 0.45f, 0.60f, 1f}, Shader.TileMode.CLAMP));
+        cv.drawRoundRect(tarjeta, 56, 56, p);
+        p.setShader(null);
+        // manchas de color suaves
+        Path recorte = new Path();
+        recorte.addRoundRect(tarjeta, 56, 56, Path.Direction.CW);
+        cv.save();
+        cv.clipPath(recorte);
+        p.setShader(new RadialGradient(W * 0.08f, H * 0.62f, 260, new int[]{0xB8B5BEDD, 0x00B5BEDD}, null, Shader.TileMode.CLAMP));
+        cv.drawRect(0, 0, W, H, p);
+        p.setShader(new RadialGradient(W * 0.88f, 0, 230, new int[]{0xFF470B24, 0x00470B24}, null, Shader.TileMode.CLAMP));
+        cv.drawRect(0, 0, W, H, p);
+        p.setShader(new RadialGradient(W * 0.55f, H, 460, new int[]{0xFFFFEDD5, 0x00FFEDD5}, null, Shader.TileMode.CLAMP));
+        cv.drawRect(0, 0, W, H, p);
+        p.setShader(null);
+        cv.restore();
+    }
+
     static Bitmap dibujar(Context c) {
         Bitmap bm = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
         Canvas cv = new Canvas(bm);
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         SharedPreferences pr = WidgetDatos.sp(c);
         long ahora = System.currentTimeMillis();
-
-        // fondo
-        p.setStyle(Paint.Style.FILL);
-        p.setShader(new LinearGradient(0, 0, W, H, 0xFF2B2B2F, 0xFF151517, Shader.TileMode.CLAMP));
-        cv.drawRoundRect(new RectF(0, 0, W, H), 56, 56, p);
-        p.setShader(null);
-        p.setStyle(Paint.Style.STROKE);
-        p.setStrokeWidth(2);
-        p.setColor(0x26FFFFFF);
-        cv.drawRoundRect(new RectF(1, 1, W - 1, H - 1), 55, 55, p);
-        p.setStyle(Paint.Style.FILL);
+        fondo(cv, p);
 
         // mercado elegido
         int sel = pr.getInt("m_sel", 0);
+        if (sel < 0 || sel > MercadoDatos.COD.length) sel = 0;
         MercadoDatos.Estado e = sel == 0 ? MercadoDatos.auto(ahora) : MercadoDatos.estado(sel - 1, ahora);
         long mins = (e.objetivo - ahora + 59999L) / 60000L;
         if (mins < 0) mins = 0;
@@ -965,77 +979,73 @@ public class ConvWidgetMercados extends AppWidgetProvider {
         if (hh > 99) hh = 99;
         String cuenta = dos(hh) + ":" + dos(mins % 60);
 
-        // titulo y subtitulo
-        p.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
-        p.setColor(BLANCO);
-        p.setTextSize(62);
+        // titulo, mercado y hora
+        p.setStyle(Paint.Style.FILL);
         p.setTextAlign(Paint.Align.LEFT);
+        p.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+        p.setColor(APRI);
+        p.setTextSize(62);
         cv.drawText("Mercados", 40, 84, p);
         p.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
-        p.setColor(GRIS);
+        p.setColor(PERI);
         p.setTextSize(28);
-        cv.drawText(MercadoDatos.NOM[e.idx] + (e.abierto ? " cierra en" : " abre en"), 40, 126, p);
+        cv.drawText(MercadoDatos.NOM[e.idx] + (e.abierto ? " cierra en" : " abre en"), 40, 122, p);
         p.setTextSize(22);
-        cv.drawText(sel == 0 ? "Automático" : "Fijo", 40, 156, p);
+        cv.drawText((e.abierto ? "Cierra " : "Abre ") + MercadoDatos.horaTxt(c, e.objetivo), 40, 152, p);
 
         // cuenta regresiva de puntos
-        puntos(cv, p, cuenta, 806, 34, 15, 5.8f);
-        p.setColor(GRIS);
-        p.setTextSize(20);
-        p.setTextAlign(Paint.Align.RIGHT);
-        cv.drawText("horas : min", 806, 160, p);
+        puntos(cv, p, cuenta, 806, 32, 15, 5.8f);
 
         // insignia del mercado
-        p.setColor(0xFF343438);
+        p.setColor(0x33FFEDD5);
         cv.drawRoundRect(new RectF(836, 34, 922, 150), 24, 24, p);
-        p.setColor(e.abierto ? VERDE : 0xFF6A6C72);
+        p.setColor(e.abierto ? 0xFF5FE3A1 : 0xFF8A7A8F);
         cv.drawCircle(879, 62, 8, p);
-        p.setColor(BLANCO);
+        p.setColor(APRI);
         p.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         p.setTextAlign(Paint.Align.CENTER);
         p.setTextSize(28);
         cv.drawText(MercadoDatos.COD[e.idx], 879, 108, p);
         p.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
         p.setTextSize(15);
-        p.setColor(GRIS);
+        p.setColor(PERI);
         cv.drawText(e.abierto ? "ABIERTO" : "CERRADO", 879, 134, p);
 
         // grafica de la divisa elegida
-        int par = pr.getInt("m_par", 0) % MercadoDatos.PARES.length;
+        String de = pr.getString("m_de", "USD");
+        String a = pr.getString("m_a", "MXN");
         int rg = pr.getInt("m_rango", 0) % MercadoDatos.DIAS.length;
-        String de = MercadoDatos.PARES[par][0];
-        String a = MercadoDatos.PARES[par][1];
+        int tipo = pr.getInt("m_tipo", 0);
         MercadoDatos.Serie s = MercadoDatos.serie(c, de, a, MercadoDatos.DIAS[rg]);
         int n = s.v.length;
 
         p.setTextAlign(Paint.Align.LEFT);
         p.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        p.setColor(BLANCO);
+        p.setColor(CRIM);
         p.setTextSize(26);
         String etiqueta = de + "/" + a;
-        cv.drawText(etiqueta, 40, 196, p);
+        cv.drawText(etiqueta, 40, 224, p);
         float xv = 40 + p.measureText(etiqueta) + 14;
         p.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
-        p.setColor(GRIS);
         p.setTextSize(24);
         String rangoTxt = MercadoDatos.DIAS_TXT[rg];
 
-        if (n < 2) {
-            cv.drawText(rangoTxt, xv, 196, p);
+        if (n < 2 || de.equals(a)) {
+            p.setColor(MUTE);
+            cv.drawText(rangoTxt, xv, 224, p);
             p.setTextAlign(Paint.Align.CENTER);
             p.setTextSize(28);
-            cv.drawText("Sin datos de la gráfica (toca para actualizar)", W / 2f, 275, p);
+            cv.drawText(de.equals(a) ? "Elige dos divisas distintas" : "Sin datos de la gráfica (toca para configurar)", W / 2f, 300, p);
         } else {
             double ult = s.v[n - 1];
             double var = (ult / s.v[0] - 1) * 100;
             boolean sube = var >= 0;
-            p.setColor(BLANCO);
+            p.setColor(CRIM);
             p.setTextSize(26);
-            String valor = WidgetDatos.df(ult < 1 ? "0.0000" : "0.00").format(ult);
-            cv.drawText(valor, xv, 196, p);
+            cv.drawText(WidgetDatos.df(ult < 1 ? "0.0000" : "0.00").format(ult), xv, 224, p);
             p.setTextAlign(Paint.Align.RIGHT);
-            p.setColor(sube ? VERDE : ROJO);
-            cv.drawText((sube ? "▲ " : "▼ ") + WidgetDatos.df("0.0").format(Math.abs(var)) + " %  ·  " + rangoTxt, 922, 196, p);
+            p.setColor(sube ? SUBE : BAJA);
+            cv.drawText((sube ? "▲ " : "▼ ") + WidgetDatos.df("0.0").format(Math.abs(var)) + " %  ·  " + rangoTxt, 922, 224, p);
 
             double mn = s.v[0], mx = s.v[0];
             for (int i = 1; i < n; i++) {
@@ -1046,48 +1056,119 @@ public class ConvWidgetMercados extends AppWidgetProvider {
             if (pad == 0) pad = mx * 0.001;
             mn -= pad;
             mx += pad;
-            final float x0 = 120, x1 = 918, y0 = 218, y1 = 332;
-            // etiquetas del eje Y
+            final float x0 = 120, x1 = 918, y0 = 252, y1 = 342;
+
+            // lineas guia y etiquetas del eje Y
             p.setTextAlign(Paint.Align.LEFT);
-            p.setColor(GRIS);
             p.setTextSize(21);
             double[] marcas = {mx - pad, (mx + mn) / 2, mn + pad};
             for (int k = 0; k < 3; k++) {
-                float y = (float) (y1 - (marcas[k] - mn) / (mx - mn) * (y1 - y0));
+                float y = yDe(marcas[k], mn, mx, y0, y1);
+                p.setColor(0x24470B24);
+                cv.drawRect(x0 - 8, y - 1, x1 + 6, y + 1, p);
+                p.setColor(MUTE);
                 cv.drawText(fmtEje(marcas[k]), 40, y + 7, p);
             }
-            // barras verticales y puntitos de la base
+
             float paso = (x1 - x0) / (n - 1);
-            float ancho = Math.max(3f, Math.min(9f, paso * 0.55f));
+            // puntitos en la base
+            p.setColor(0x66470B24);
+            for (int i = 0; i < n; i++) cv.drawCircle(x0 + i * paso, y1 + 18, 1.8f, p);
+
             p.setStrokeCap(Paint.Cap.ROUND);
-            for (int i = 0; i < n; i++) {
-                float x = x0 + i * paso;
-                p.setStyle(Paint.Style.FILL);
-                p.setColor(0x55FFFFFF);
-                cv.drawCircle(x, y1 + 18, 1.8f, p);
-                if (i == 0) continue;
-                float ya = (float) (y1 - (s.v[i - 1] - mn) / (mx - mn) * (y1 - y0));
-                float yb = (float) (y1 - (s.v[i] - mn) / (mx - mn) * (y1 - y0));
-                if (Math.abs(ya - yb) < 6f) {
-                    float mid = (ya + yb) / 2f;
-                    ya = mid - 3f;
-                    yb = mid + 3f;
+            if (tipo == 0) {
+                // velas japonesas (agrupando cierres diarios)
+                int g = MercadoDatos.AGRUPA[rg];
+                int m = (n - 1 + g - 1) / g;
+                float ranura = (x1 - x0) / m;
+                float cuerpo = Math.max(6f, Math.min(20f, ranura * 0.58f));
+                for (int k = 0; k < m; k++) {
+                    int ia = k * g;
+                    int ib = Math.min(n - 1, (k + 1) * g);
+                    double ap = s.v[ia], ci = s.v[ib], alto = ap, bajo = ap;
+                    for (int j = ia; j <= ib; j++) {
+                        if (s.v[j] > alto) alto = s.v[j];
+                        if (s.v[j] < bajo) bajo = s.v[j];
+                    }
+                    float cx = x0 + (k + 0.5f) * ranura;
+                    float yA = yDe(ap, mn, mx, y0, y1), yC = yDe(ci, mn, mx, y0, y1);
+                    float yH = yDe(alto, mn, mx, y0, y1), yL = yDe(bajo, mn, mx, y0, y1);
+                    int col = ci >= ap ? SUBE : BAJA;
+                    p.setColor(col);
+                    p.setStyle(Paint.Style.STROKE);
+                    p.setStrokeWidth(3f);
+                    cv.drawLine(cx, yH, cx, yL, p);
+                    p.setStyle(Paint.Style.FILL);
+                    float arriba = Math.min(yA, yC), abajo = Math.max(yA, yC);
+                    if (abajo - arriba < 5f) {
+                        float mi = (arriba + abajo) / 2f;
+                        arriba = mi - 2.5f;
+                        abajo = mi + 2.5f;
+                    }
+                    cv.drawRoundRect(new RectF(cx - cuerpo / 2f, arriba, cx + cuerpo / 2f, abajo), 4, 4, p);
                 }
+            } else if (tipo == 1) {
+                // linea con relleno suave
+                Path linea = new Path();
+                Path area = new Path();
+                for (int i = 0; i < n; i++) {
+                    float x = x0 + i * paso;
+                    float y = yDe(s.v[i], mn, mx, y0, y1);
+                    if (i == 0) {
+                        linea.moveTo(x, y);
+                        area.moveTo(x, y1);
+                        area.lineTo(x, y);
+                    } else {
+                        linea.lineTo(x, y);
+                        area.lineTo(x, y);
+                    }
+                }
+                area.lineTo(x1, y1);
+                area.close();
+                p.setStyle(Paint.Style.FILL);
+                p.setShader(new LinearGradient(0, y0, 0, y1, 0x59470B24, 0x00470B24, Shader.TileMode.CLAMP));
+                cv.drawPath(area, p);
+                p.setShader(null);
                 p.setStyle(Paint.Style.STROKE);
-                p.setStrokeWidth(ancho);
-                p.setColor(i == n - 1 ? NARANJA : 0xFFF2F2F4);
-                cv.drawLine(x, ya, x, yb, p);
+                p.setStrokeWidth(5f);
+                p.setStrokeJoin(Paint.Join.ROUND);
+                p.setColor(CRIM);
+                cv.drawPath(linea, p);
+                p.setStyle(Paint.Style.FILL);
+                float yu = yDe(s.v[n - 1], mn, mx, y0, y1);
+                p.setColor(APRI);
+                cv.drawCircle(x1, yu, 12, p);
+                p.setColor(ACENTO);
+                cv.drawCircle(x1, yu, 8, p);
+            } else {
+                // barras verticales entre un cierre y el siguiente
+                float ancho = Math.max(3f, Math.min(9f, paso * 0.55f));
+                for (int i = 1; i < n; i++) {
+                    float x = x0 + i * paso;
+                    float ya = yDe(s.v[i - 1], mn, mx, y0, y1);
+                    float yb = yDe(s.v[i], mn, mx, y0, y1);
+                    if (Math.abs(ya - yb) < 6f) {
+                        float mi = (ya + yb) / 2f;
+                        ya = mi - 3f;
+                        yb = mi + 3f;
+                    }
+                    p.setStyle(Paint.Style.STROKE);
+                    p.setStrokeWidth(ancho);
+                    p.setColor(i == n - 1 ? ACENTO : CRIM);
+                    cv.drawLine(x, ya, x, yb, p);
+                }
             }
             p.setStyle(Paint.Style.FILL);
+
             // fechas
-            p.setColor(GRIS);
+            p.setColor(MUTE);
             p.setTextSize(21);
             p.setTextAlign(Paint.Align.LEFT);
-            cv.drawText(fecha(s.f[0]), x0, 372, p);
+            cv.drawText(fecha(s.f[0]), x0, 380, p);
             p.setTextAlign(Paint.Align.CENTER);
-            cv.drawText(fecha(s.f[n / 2]), (x0 + x1) / 2f, 372, p);
+            cv.drawText(fecha(s.f[n / 2]), (x0 + x1) / 2f, 380, p);
             p.setTextAlign(Paint.Align.RIGHT);
-            cv.drawText("hoy", x1 + 4, 372, p);
+            cv.drawText("hoy", x1 + 4, 380, p);
         }
 
         // estado de las 4 bolsas
@@ -1100,13 +1181,307 @@ public class ConvWidgetMercados extends AppWidgetProvider {
             MercadoDatos.Estado ei = MercadoDatos.estado(i, ahora);
             float cx = 40 + i * ancho4;
             boolean activo = i == e.idx;
-            p.setColor(ei.abierto ? VERDE : 0xFF55575C);
+            p.setColor(ei.abierto ? SUBE : 0xFFB9A58F);
             cv.drawCircle(cx + 8, 428, 8, p);
             p.setTypeface(Typeface.create("sans-serif", activo ? Typeface.BOLD : Typeface.NORMAL));
-            p.setColor(activo ? BLANCO : GRIS);
+            p.setColor(activo ? CRIM : MUTE);
             cv.drawText(MercadoDatos.COD[i], cx + 26, 436, p);
         }
         return bm;
+    }
+}
+"""
+
+F[JD + '/ConfigMercados.java'] = r"""package __PKG__;
+
+import android.app.Activity;
+import android.appwidget.AppWidgetManager;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
+import android.os.Bundle;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
+import android.widget.Toast;
+
+public class ConfigMercados extends Activity {
+    static final int CRIM = 0xFF470B24;
+    static final int PERI = 0xFFB5BEDD;
+    static final int APRI = 0xFFFFEDD5;
+    static final int MUTE = 0xFF6B4A5E;
+
+    interface Al {
+        void sel(int i);
+    }
+
+    SharedPreferences sp;
+    float dens;
+    LinearLayout col;
+    TextView[] chipsDe, chipsA;
+
+    int dp(int v) {
+        return (int) (v * dens + 0.5f);
+    }
+
+    @Override
+    protected void onCreate(Bundle b) {
+        super.onCreate(b);
+        dens = getResources().getDisplayMetrics().density;
+        sp = WidgetDatos.sp(this);
+        int id = AppWidgetManager.INVALID_APPWIDGET_ID;
+        Bundle ex = getIntent().getExtras();
+        if (ex != null) id = ex.getInt(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID);
+        if (id != AppWidgetManager.INVALID_APPWIDGET_ID) {
+            Intent r = new Intent();
+            r.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id);
+            setResult(RESULT_OK, r);
+        } else {
+            setResult(RESULT_CANCELED);
+        }
+        getWindow().setBackgroundDrawable(new ColorDrawable(0xB0000000));
+
+        FrameLayout raiz = new FrameLayout(this);
+        raiz.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                terminar();
+            }
+        });
+
+        ScrollView sv = new ScrollView(this);
+        sv.setVerticalScrollBarEnabled(false);
+        GradientDrawable fondo = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{APRI, 0xFFF3E4D8, PERI});
+        fondo.setCornerRadius(dp(28));
+        sv.setBackground(fondo);
+        sv.setClickable(true);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+        lp.setMargins(dp(16), dp(32), dp(16), dp(32));
+        raiz.addView(sv, lp);
+
+        col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setPadding(dp(20), dp(20), dp(20), dp(20));
+        sv.addView(col, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView t = new TextView(this);
+        t.setText("Personalizar Mercados");
+        t.setTextColor(CRIM);
+        t.setTextSize(22);
+        t.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        col.addView(t);
+
+        // divisas
+        etiqueta("DIVISA");
+        int iDe = indice(MercadoDatos.MONEDAS, sp.getString("m_de", "USD"));
+        chipsDe = new TextView[MercadoDatos.MONEDAS.length];
+        col.addView(chips(MercadoDatos.MONEDAS, iDe, chipsDe, new Al() {
+            public void sel(int i) {
+                String nueva = MercadoDatos.MONEDAS[i];
+                sp.edit().putString("m_de", nueva).apply();
+                if (nueva.equals(sp.getString("m_a", "MXN"))) {
+                    String otra = nueva.equals("USD") ? "MXN" : "USD";
+                    sp.edit().putString("m_a", otra).apply();
+                    pintarChips(chipsA, indice(MercadoDatos.MONEDAS, otra));
+                }
+                cambio(true);
+            }
+        }));
+        etiqueta("CONTRA");
+        int iA = indice(MercadoDatos.MONEDAS, sp.getString("m_a", "MXN"));
+        chipsA = new TextView[MercadoDatos.MONEDAS.length];
+        col.addView(chips(MercadoDatos.MONEDAS, iA, chipsA, new Al() {
+            public void sel(int i) {
+                String nueva = MercadoDatos.MONEDAS[i];
+                sp.edit().putString("m_a", nueva).apply();
+                if (nueva.equals(sp.getString("m_de", "USD"))) {
+                    String otra = nueva.equals("USD") ? "MXN" : "USD";
+                    sp.edit().putString("m_de", otra).apply();
+                    pintarChips(chipsDe, indice(MercadoDatos.MONEDAS, otra));
+                }
+                cambio(true);
+            }
+        }));
+
+        // grafica
+        etiqueta("TIPO DE GRÁFICA");
+        col.addView(chips(new String[]{"Velas japonesas", "Líneas", "Barras"}, sp.getInt("m_tipo", 0), null, new Al() {
+            public void sel(int i) {
+                sp.edit().putInt("m_tipo", i).apply();
+                cambio(false);
+            }
+        }));
+        etiqueta("PERIODO");
+        col.addView(chips(new String[]{"1 mes", "3 meses", "6 meses"}, sp.getInt("m_rango", 0), null, new Al() {
+            public void sel(int i) {
+                sp.edit().putInt("m_rango", i).apply();
+                cambio(true);
+            }
+        }));
+
+        // mercado y horario
+        etiqueta("MERCADO");
+        col.addView(chips(new String[]{"Automático", "Sídney", "Tokio", "Londres", "Nueva York"}, sp.getInt("m_sel", 0), null, new Al() {
+            public void sel(int i) {
+                sp.edit().putInt("m_sel", i).apply();
+                cambio(false);
+            }
+        }));
+        etiqueta("FORMATO DE HORA");
+        col.addView(chips(new String[]{"24 horas", "12 horas (AM/PM)"}, sp.getInt("m_f", 0), null, new Al() {
+            public void sel(int i) {
+                sp.edit().putInt("m_f", i).apply();
+                cambio(false);
+            }
+        }));
+        etiqueta("ZONA HORARIA");
+        col.addView(chips(new String[]{"Mi hora local", "Ciudad de México", "Nueva York", "Londres", "Tokio", "UTC"}, sp.getInt("m_zona", 0), null, new Al() {
+            public void sel(int i) {
+                sp.edit().putInt("m_zona", i).apply();
+                cambio(false);
+            }
+        }));
+
+        // botones
+        LinearLayout fila = new LinearLayout(this);
+        fila.setOrientation(LinearLayout.HORIZONTAL);
+        fila.setPadding(0, dp(22), 0, 0);
+        TextView act = boton("Actualizar", false);
+        act.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                Toast.makeText(ConfigMercados.this, "Actualizando…", Toast.LENGTH_SHORT).show();
+                cambio(true, true);
+            }
+        });
+        TextView ok = boton("Listo", true);
+        ok.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                terminar();
+            }
+        });
+        LinearLayout.LayoutParams l1 = new LinearLayout.LayoutParams(0, dp(46), 1);
+        l1.rightMargin = dp(10);
+        fila.addView(act, l1);
+        fila.addView(ok, new LinearLayout.LayoutParams(0, dp(46), 1));
+        col.addView(fila);
+
+        TextView nota = new TextView(this);
+        nota.setText("Las velas se arman con los cierres diarios del Banco Central Europeo. Los horarios de las bolsas no incluyen días festivos.");
+        nota.setTextColor(MUTE);
+        nota.setTextSize(11);
+        nota.setPadding(0, dp(14), 0, 0);
+        col.addView(nota);
+
+        setContentView(raiz);
+        ConvWidgetMercados.repintar(getApplicationContext());
+    }
+
+    void terminar() {
+        ConvWidgetMercados.repintar(getApplicationContext());
+        finish();
+    }
+
+    void cambio(boolean conRed) {
+        cambio(conRed, false);
+    }
+
+    void cambio(final boolean conRed, final boolean forzar) {
+        final android.content.Context app = getApplicationContext();
+        ConvWidgetMercados.repintar(app);
+        if (!conRed) return;
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    MercadoDatos.refrescar(app, forzar);
+                    ConvWidgetMercados.repintar(app);
+                } catch (Exception e) {
+                }
+            }
+        }).start();
+    }
+
+    static int indice(String[] l, String v) {
+        for (int i = 0; i < l.length; i++) if (l[i].equals(v)) return i;
+        return 0;
+    }
+
+    void etiqueta(String txt) {
+        TextView t = new TextView(this);
+        t.setText(txt);
+        t.setTextColor(MUTE);
+        t.setTextSize(11);
+        t.setLetterSpacing(0.08f);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setPadding(dp(2), dp(18), 0, dp(8));
+        col.addView(t);
+    }
+
+    TextView boton(String txt, boolean lleno) {
+        TextView t = new TextView(this);
+        t.setText(txt);
+        t.setGravity(Gravity.CENTER);
+        t.setTextSize(15);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        GradientDrawable g = new GradientDrawable();
+        g.setCornerRadius(dp(23));
+        if (lleno) {
+            g.setColor(CRIM);
+            t.setTextColor(APRI);
+        } else {
+            g.setColor(0x00000000);
+            g.setStroke(dp(2), CRIM);
+            t.setTextColor(CRIM);
+        }
+        t.setBackground(g);
+        return t;
+    }
+
+    void pintarChips(TextView[] tv, int s) {
+        for (int j = 0; j < tv.length; j++) {
+            boolean on = j == s;
+            GradientDrawable g = new GradientDrawable();
+            g.setCornerRadius(dp(20));
+            g.setColor(on ? CRIM : 0x00000000);
+            g.setStroke(dp(1), on ? CRIM : 0x80470B24);
+            tv[j].setBackground(g);
+            tv[j].setTextColor(on ? APRI : CRIM);
+        }
+    }
+
+    View chips(String[] et, int sel, TextView[] destino, final Al al) {
+        HorizontalScrollView hs = new HorizontalScrollView(this);
+        hs.setHorizontalScrollBarEnabled(false);
+        LinearLayout fila = new LinearLayout(this);
+        fila.setOrientation(LinearLayout.HORIZONTAL);
+        hs.addView(fila);
+        final TextView[] tv = destino != null ? destino : new TextView[et.length];
+        for (int i = 0; i < et.length; i++) {
+            TextView t = new TextView(this);
+            t.setText(et[i]);
+            t.setTextSize(14);
+            t.setGravity(Gravity.CENTER);
+            t.setPadding(dp(14), dp(8), dp(14), dp(8));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.rightMargin = dp(8);
+            fila.addView(t, lp);
+            tv[i] = t;
+            final int ii = i;
+            t.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    pintarChips(tv, ii);
+                    al.sel(ii);
+                }
+            });
+        }
+        pintarChips(tv, sel);
+        return hs;
     }
 }
 """
@@ -1133,6 +1508,13 @@ if True:
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/%s"/>
         </receiver>
 ''' % (PKG, clase, nombre, info)
+    if 'ConfigMercados' not in s:
+        rec += '''
+        <activity android:name="%s.ConfigMercados" android:exported="true" android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_CONFIGURE"/></intent-filter>
+        </activity>
+''' % PKG
     assert '</application>' in s
     s = s.replace('</application>', rec + '    </application>', 1)
     open(mf, 'w', encoding='utf-8').write(s)
